@@ -44,15 +44,62 @@ class TreeNode:
         return self is other
 
 
-def get_all_nodes_on_subtree(tree_node):
+def get_all_indices_on_subtree(tree_node):
 
     res = set()
     if tree_node:
         res.add(tree_node.value)
         for child in tree_node.children:
-            res = res.union(get_all_nodes_on_subtree(child))
+            res = res.union(get_all_indices_on_subtree(child))
             
     return res
+
+
+def join_all(tree_node, table_access):
+
+    if not tree_node:
+        return pd.DataFrame()
+        
+    current_index = tree_node.value
+    result_table = table_access[current_index]
+    
+    for child in tree_node.children:
+        child_table = join_all(child, table_access)
+        common_key = find_key(result_table, child_table)
+        result_table = pd.merge(result_table, child_table, on=common_key, how="inner")
+            
+    return result_table
+
+    
+def join_table_with_all_nodes_on_subtree(tree_node, table_access, key_value_map, blocked_nodes=set(), skipped_node=None):
+
+    if not tree_node or tree_node in blocked_nodes:
+        return pd.DataFrame()
+        
+    current_index = tree_node.value
+
+    if tree_node != skipped_node:
+        base_table = table_access[current_index]
+    else:
+        base_table = pd.DataFrame([key_value_map])
+
+    # build mask dynamically
+    mask = pd.Series(True, index=base_table.index)
+    for col, val in key_value_map.items():
+        if col in base_table:
+            mask &= (base_table[col] == val)
+
+    result_table = base_table[mask].reset_index(drop=True)
+    
+    for child in tree_node.children:
+        if child in blocked_nodes:
+            continue
+            
+        child_table = join_table_with_all_nodes_on_subtree(child, table_access, key_value_map, blocked_nodes, skipped_node)
+        common_key = find_key(result_table, child_table)
+        result_table = pd.merge(result_table, child_table, on=common_key, how="inner")
+            
+    return result_table
 
 
 def find_key(S1: pd.DataFrame, S2: pd.DataFrame):
@@ -65,69 +112,40 @@ def find_key(S1: pd.DataFrame, S2: pd.DataFrame):
         raise ValueError("No common key found between tables")
     return common
 
-
-def recursive_join(tables):
-    """
-    Recursively join a list of DataFrames using find_key(S1, S2).
-    """
-    if len(tables) == 0:
-        return pd.DataFrame()   # nothing to join
-    if len(tables) == 1:
-        return tables[0]
-    if len(tables) == 2:
-        S1, S2 = tables
-        join_cols = find_key(S1, S2)
-        return pd.merge(S1, S2, on=join_cols, how="inner")
-    else:
-        # join first with recursive join of the rest
-        S1 = tables[0]
-        rest = recursive_join(tables[1:])
-        join_cols = find_key(S1, rest)
-        return pd.merge(S1, rest, on=join_cols, how="inner")
-
-
-def join_result(table_access, indices_of_nodes, key_value_map):
-    # Example: list of DataFrames
-    tables = [table_access[i] for i in indices_of_nodes]
-    
-    # Join all tables on 'key'    
-    joined = recursive_join(tables)
-    
-    # build mask dynamically
-    mask = pd.Series(True, index=joined.index)
-    for col, val in key_value_map.items():
-        mask &= (joined[col] == val)
-    
-    filtered = joined[mask].reset_index(drop=True)
-    return filtered
-    
                         
 def down_result(index, table_access, tree_access, key_value_map):
     current_node = tree_access[index]
-    nodes_on_subtree = get_all_nodes_on_subtree(current_node)
-    
-    return join_result(table_access, nodes_on_subtree, key_value_map)
+    return join_table_with_all_nodes_on_subtree(current_node, table_access, key_value_map)
     
     
 def up_result(index, table_access, tree_access, key_value_map):
     root_index = 1
     root = tree_access[root_index]
-    all_nodes = get_all_nodes_on_subtree(root)
-    
     current_node = tree_access[index]
-    nodes_on_subtree = get_all_nodes_on_subtree(current_node)    
 
-    upper_nodes = all_nodes - nodes_on_subtree
+    return join_table_with_all_nodes_on_subtree(root, table_access, key_value_map, blocked_nodes={current_node})
     
-    return join_result(table_access, upper_nodes, key_value_map)
-
     
-def all_result(index, table_access, tree_access, key_value_map):
+def else_result(index, table_access, tree_access, key_value_map):
     root_index = 1
     root = tree_access[root_index]
-    all_nodes = get_all_nodes_on_subtree(root)
-    all_nodes.remove(index)
+    current_node = tree_access[index]
 
-    return join_result(table_access, all_nodes, key_value_map)
+    return join_table_with_all_nodes_on_subtree(root, table_access, key_value_map, blocked_nodes={}, skipped_node=current_node)
+
+
+def all_result(index, table_access, tree_access):
+    current_node = tree_access[index]
+    return join_all(current_node, table_access)
+
+
+def fill_in_data(Data, row_index, column, value):
+    """
+    Add a value to a DataFrame at (row_index, column).
+    Creates the row if it does not exist, filling other columns with 0.
+    """
+    if row_index not in Data.index:
+        Data.loc[row_index] = ["0"] * len(Data.columns)
+    Data.loc[row_index, column] = value
 
 
