@@ -102,17 +102,29 @@ def join_table_with_all_nodes_on_subtree(tree_node, table_access, key_value_map,
     return result_table
 
 
-def find_key(S1: pd.DataFrame, S2: pd.DataFrame):
+def find_key(S1: pd.DataFrame, S2: pd.DataFrame, impose_join_key=False):
     """
     Black-box function to find join key(s) between two DataFrames.
     Replace this with your own logic.
     """
     common = list(set(S1.columns) & set(S2.columns))
-    if not common:
+
+    if not common and impose_join_key:
         raise ValueError("No common key found between tables")
     return common
 
-                        
+
+def construct_row_index(index, row, join_key_columns):
+    # don't add index for now
+    return str(dict(sorted(row[join_key_columns].to_dict().items())))
+
+def Head(values, vector=None):
+    if not vector:
+        return f"H({', '.join(values)})"
+    else:
+        return f"H({', '.join(values)}, {vector})"
+
+
 def down_result(index, table_access, tree_access, key_value_map):
     current_node = tree_access[index]
     return join_table_with_all_nodes_on_subtree(current_node, table_access, key_value_map)
