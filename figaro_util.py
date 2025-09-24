@@ -1,5 +1,6 @@
 from functools import reduce
 import pandas as pd
+import ast
 
 class TreeNode:
     def __init__(self, value, parent=None):
@@ -164,3 +165,28 @@ def fill_in_data(Data, row_index, column, value):
     Data.loc[row_index, column] = value
 
 
+def data_projection(df, keys):
+    # Parse string index -> dict
+    parsed_index = [ast.literal_eval(idx) for idx in df.index]
+
+    # Sort keys to enforce consistent order
+    keys = sorted(keys)
+
+    # Extract only subset of dict keys in sorted order
+    group_keys = [{k: d[k] for k in keys} for d in parsed_index]
+
+    # Create new temporary column to group by
+    group_key_strs = [str(gk) for gk in group_keys]
+    df["_group"] = group_key_strs
+
+    # Custom aggregator that builds H_g(...)
+    def custom_agg(values):
+        return f'H_g({", ".join(values)})'
+
+    grouped = df.groupby("_group").agg(custom_agg)
+
+    # Drop helper column, fix index back to strings
+    grouped.index.name = None
+
+    return grouped
+    
