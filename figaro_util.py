@@ -119,13 +119,19 @@ def construct_row_index_dict(index, row, join_key_columns):
     # don't add index for now
     return dict(sorted(row[join_key_columns].to_dict().items()))
 
-def Head(values, vector=None):
-    if not vector:
-        return f"H({', '.join(values)})"
-    else:
-        return f"H({', '.join(values)}, {vector})"
+def Head(values, wrap_singleton):
+    if not wrap_singleton and len(values) == 1:
+        return values[0]
+    return f"H({', '.join(values)})"
+    
 
-def multiply(coefficient, variable):
+def multiply(coefficient, variable, wrap_singleton=False):
+    if not wrap_singleton and coefficient == "sqrt(1)":
+        if variable == "sqrt(1)":
+            return "1"
+        else:
+            return variable
+        
     return f"{coefficient}*{variable}"
 
 
@@ -134,16 +140,14 @@ def down_result(index, table_access, tree_access, key_value_map):
     return join_table_with_all_nodes_on_subtree(current_node, table_access, key_value_map)
     
     
-def up_result(index, table_access, tree_access, key_value_map):
-    root_index = 1
+def up_result(root_index, index, table_access, tree_access, key_value_map):
     root = tree_access[root_index]
     current_node = tree_access[index]
 
     return join_table_with_all_nodes_on_subtree(root, table_access, key_value_map, blocked_nodes={current_node})
     
     
-def else_result(index, table_access, tree_access, key_value_map):
-    root_index = 1
+def else_result(root_index, index, table_access, tree_access, key_value_map):
     root = tree_access[root_index]
     current_node = tree_access[index]
 
@@ -165,7 +169,7 @@ def fill_in_data(Data, row_index, column, value):
     Data.loc[row_index, column] = value
 
 
-def data_projection(df, keys):
+def data_projection(df, scales, keys, wrap_singleton):
     # Parse string index -> dict
     parsed_index = [ast.literal_eval(idx) for idx in df.index]
 
@@ -179,14 +183,25 @@ def data_projection(df, keys):
     group_key_strs = [str(gk) for gk in group_keys]
     df["_group"] = group_key_strs
 
-    # Custom aggregator that builds H_g(...)
-    def custom_agg(values):
-        return f'H_g({", ".join(values)})'
+    # --- Modified custom aggregator ---
+    def custom_agg(s, flag, scales):
+        # s: Series (values + original indices)
+        values = s.tolist()
+        orig_indices = s.index.tolist()
 
-    grouped = df.groupby("_group").agg(custom_agg)
+        if not flag and len(values) == 1:
+            return values[0]
 
-    # Drop helper column, fix index back to strings
+        # Combine using scale[original_index]
+        terms = [multiply(scales[idx], val) for idx, val in zip(orig_indices, values)]
+        vector_entries = [scales[idx]for idx in orig_indices]
+        return f'({"+".join(terms)})/Norm({",".join(vector_entries)})'
+
+    # Apply custom aggregator — note extra arg via lambda closure
+    grouped = df.groupby("_group").agg(lambda s: custom_agg(s, wrap_singleton, scales))
+
     grouped.index.name = None
+    df.drop(columns=["_group"], inplace=True)
 
     return grouped
     
